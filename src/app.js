@@ -32,7 +32,7 @@ const corsOptions = {
         const allowedOrigins = [
             'http://localhost:4200',
             'http://127.0.0.1:4200',
-            'https://frontendeduar-production.up.railway.app',
+            'https://demetriodentalfront-production.up.railway.app',
             config.frontendUrl
         ];
         
@@ -57,7 +57,7 @@ app.use(cors(corsOptions));
 
 // Middleware para asegurar headers CORS (respaldo)
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://frontendeduar-production.up.railway.app');
+    res.header('Access-Control-Allow-Origin', req.headers.origin || 'https://demetriodentalfront-production.up.railway.app');
     res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
