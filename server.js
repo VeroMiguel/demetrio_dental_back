@@ -50,26 +50,28 @@ async function startServer() {
         }
     });
     
-    // ✅ NUEVO CRON JOB - Limpiar tokens FCM antiguos (cada domingo a las 3:00 AM)
-    cron.schedule('0 3 * * 0', async () => {
-        try {
-            console.log('🕑 Ejecutando limpieza de tokens FCM antiguos (Domingo 3:00 AM)...');
-            
-            const fechaLimite = new Date();
-            fechaLimite.setDate(fechaLimite.getDate() - 60); // Tokens con más de 60 días
-            
-            const [result] = await sequelize.query(
-                `DELETE FROM tokens_fcm 
-                 WHERE activo = 0 
-                 AND actualizado_en < :fechaLimite`,
-                { replacements: { fechaLimite: fechaLimite } }
-            );
-            
-            console.log(`🗑️ Tokens FCM antiguos eliminados: ${result.affectedRows} registros`);
-        } catch (error) {
-            console.error('❌ Error limpiando tokens FCM:', error.message);
-        }
-    });
+// server.js - COMENTAR TEMPORALMENTE este CRON job
+/*
+cron.schedule('0 3 * * 0', async () => {
+    try {
+        console.log('🕑 Ejecutando limpieza de tokens FCM antiguos (Domingo 3:00 AM)...');
+        
+        const fechaLimite = new Date();
+        fechaLimite.setDate(fechaLimite.getDate() - 60);
+        
+        const [result] = await sequelize.query(
+            `DELETE FROM tokens_fcm 
+             WHERE activo = 0 
+             AND actualizado_en < :fechaLimite`,
+            { replacements: { fechaLimite: fechaLimite } }
+        );
+        
+        console.log(`🗑️ Tokens FCM antiguos eliminados: ${result.affectedRows} registros`);
+    } catch (error) {
+        console.error('❌ Error limpiando tokens FCM:', error.message);
+    }
+});
+*/
     
     const server = app.listen(PORT, () => {
         console.log(`

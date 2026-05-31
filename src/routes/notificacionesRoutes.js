@@ -6,6 +6,12 @@ const admin = require('../config/firebase-admin');
 const { Op } = require('sequelize'); // ✅ AGREGAR ESTA LÍNEA
 
 // Registrar token FCM - VERSIÓN MEJORADA CON LIMPIEZA AUTOMÁTICA
+// notificacionesRoutes.js - Reemplazar TODO el método registrar-token
+
+// notificacionesRoutes.js - Versión SIMPLE usando UNIQUE KEY
+
+// notificacionesRoutes.js - Versión SIMPLE usando UNIQUE KEY
+
 router.post('/registrar-token', autenticar, async (req, res) => {
     try {
         const { token, dispositivo, plataforma } = req.body;
@@ -14,69 +20,69 @@ router.post('/registrar-token', autenticar, async (req, res) => {
             return res.status(400).json({ error: 'Token no proporcionado' });
         }
         
-        // ✅ 1. Desactivar TODOS los tokens del usuario
-        await TokenFCM.update(
-            { activo: false },
-            { where: { usuario_id: req.usuario.id, activo: true } }
-        );
+        const userAgent = dispositivo || req.headers['user-agent'] || '';
         
-        // ✅ 2. Eliminar tokens inactivos con más de 30 días
-        const fechaLimite = new Date();
-        fechaLimite.setDate(fechaLimite.getDate() - 30);
-        const eliminados = await TokenFCM.destroy({
-            where: {
+        console.log(`📝 [DEBUG] Registrando token para usuario ${req.usuario.id}`);
+        console.log(`📝 [DEBUG] Plataforma: ${plataforma || 'web'}`);
+        console.log(`📝 [DEBUG] Token: ${token.substring(0, 30)}...`);
+        
+        // ✅ Usar UPSERT basado en la constraint UNIQUE KEY
+        const [tokenRecord, created] = await TokenFCM.findOrCreate({
+            where: { token: token },
+            defaults: {
+                token: token,
                 usuario_id: req.usuario.id,
-                activo: false,
-                actualizado_en: { [Op.lt]: fechaLimite }
+                dispositivo: userAgent,
+                plataforma: plataforma || 'web',
+                ultimo_uso: new Date(),
+                activo: true,
+                creado_en: new Date(),
+                actualizado_en: new Date()
             }
         });
         
-        if (eliminados > 0) {
-            console.log(`🗑️ Eliminados ${eliminados} tokens antiguos del usuario ${req.usuario.id}`);
-        }
-        
-        // ✅ 3. Buscar si el token ya existe (para reactivarlo)
-        let tokenRecord = await TokenFCM.findOne({ where: { token } });
-        
-        if (tokenRecord) {
+        if (!created) {
+            // ✅ Ya existía - ACTUALIZAR
             await tokenRecord.update({
                 usuario_id: req.usuario.id,
-                dispositivo: dispositivo || req.headers['user-agent'],
+                dispositivo: userAgent,
                 plataforma: plataforma || 'web',
                 ultimo_uso: new Date(),
-                activo: true
+                activo: true,
+                actualizado_en: new Date()
             });
-            console.log(`✅ Token FCM reactivado para usuario ${req.usuario.id}`);
+            console.log(`✅ Token existente ACTUALIZADO para usuario ${req.usuario.id}`);
         } else {
-            await TokenFCM.create({
-                token,
-                usuario_id: req.usuario.id,
-                dispositivo: dispositivo || req.headers['user-agent'],
-                plataforma: plataforma || 'web',
-                ultimo_uso: new Date(),
-                activo: true
-            });
-            console.log(`✅ Nuevo token FCM creado para usuario ${req.usuario.id}`);
+            // ✅ Nuevo token - CREADO
+            console.log(`✅ Nuevo token CREADO para usuario ${req.usuario.id}`);
         }
         
-        // ✅ 4. Limpieza global de tokens muy antiguos (más de 90 días)
-        const fechaLimiteGlobal = new Date();
-        fechaLimiteGlobal.setDate(fechaLimiteGlobal.getDate() - 90);
-        const globalEliminados = await TokenFCM.destroy({
-            where: {
-                activo: false,
-                actualizado_en: { [Op.lt]: fechaLimiteGlobal }
+        // ✅ Opcional: Desactivar tokens del mismo usuario que NO son este token
+        // Esto asegura que solo un token esté activo por sesión (evita duplicados activos)
+        await TokenFCM.update(
+            { activo: false },
+            { 
+                where: { 
+                    usuario_id: req.usuario.id,
+                    token: { [Op.ne]: token },  // Diferente al actual
+                    activo: true
+                } 
             }
+        );
+        
+        // ✅ Verificar resultado final
+        const verificar = await TokenFCM.findOne({ where: { token: token } });
+        console.log(`📊 Token registrado - Activo: ${verificar?.activo === 1 ? 'SÍ ✅' : 'NO ❌'}`);
+        
+        res.json({ 
+            success: true, 
+            message: created ? 'Token registrado correctamente' : 'Token actualizado correctamente',
+            activo: verificar?.activo === 1
         });
         
-        if (globalEliminados > 0) {
-            console.log(`🗑️ Limpieza global: ${globalEliminados} tokens eliminados`);
-        }
-        
-        res.json({ success: true, message: 'Token registrado correctamente' });
     } catch (error) {
-        console.error('Error registrando token:', error);
-        res.status(500).json({ error: 'Error registrando token' });
+        console.error('❌ Error registrando token:', error);
+        res.status(500).json({ error: 'Error registrando token', details: error.message });
     }
 });
 
