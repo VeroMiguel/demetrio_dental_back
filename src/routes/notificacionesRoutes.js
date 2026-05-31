@@ -5,7 +5,7 @@ const { Orden, Doctor, Servicio, TokenFCM } = require('../models');
 const admin = require('../config/firebase-admin');
 const { Op } = require('sequelize');
 
-// Registrar token FCM - VERSIÓN CORREGIDA (sin violación de UNIQUE)
+// Registrar token FCM - VERSIÓN DEFINITIVA
 router.post('/registrar-token', autenticar, async (req, res) => {
     try {
         const { token, dispositivo, plataforma } = req.body;
@@ -17,15 +17,15 @@ router.post('/registrar-token', autenticar, async (req, res) => {
         const userAgent = dispositivo || req.headers['user-agent'] || '';
         
         console.log(`📝 [DEBUG] Registrando token para usuario ${req.usuario.id}`);
-        console.log(`📝 [DEBUG] Token: ${token.substring(0, 40)}...`);
+        console.log(`📝 [DEBUG] Nuevo token: ${token.substring(0, 50)}...`);
         
-        // ✅ PRIMERO: Buscar si el token YA EXISTE (por su valor único)
+        // ✅ 1. Verificar si este token NUEVO ya existe (por si acaso)
         let tokenExistente = await TokenFCM.findOne({ 
             where: { token: token }
         });
         
         if (tokenExistente) {
-            // ✅ El token ya existe en la BD - solo actualizar sus datos
+            // El token ya existe - solo reactivarlo
             await tokenExistente.update({
                 usuario_id: req.usuario.id,
                 dispositivo: userAgent,
@@ -34,50 +34,38 @@ router.post('/registrar-token', autenticar, async (req, res) => {
                 activo: true,
                 actualizado_en: new Date()
             });
-            console.log(`✅ Token existente ACTUALIZADO (ID: ${tokenExistente.id})`);
+            console.log(`✅ Token existente REACTIVADO (ID: ${tokenExistente.id})`);
             
-            res.json({ 
-                success: true, 
-                message: 'Token actualizado correctamente',
-                activo: true
-            });
+            res.json({ success: true, message: 'Token reactivado correctamente' });
             return;
         }
         
-        // ✅ El token NO existe - buscar si hay un registro para este usuario/plataforma
-        let tokenRecord = await TokenFCM.findOne({ 
+        // ✅ 2. Eliminar el token ANTIGUO del mismo usuario/plataforma (si existe)
+        const tokenAntiguo = await TokenFCM.findOne({ 
             where: { 
                 usuario_id: req.usuario.id,
                 plataforma: plataforma || 'web'
             } 
         });
         
-        if (tokenRecord) {
-            // ✅ Actualizar el registro existente con el NUEVO token
-            await tokenRecord.update({
-                token: token,  // ← Cambiar el token
-                dispositivo: userAgent,
-                ultimo_uso: new Date(),
-                activo: true,
-                actualizado_en: new Date()
-            });
-            console.log(`✅ Registro ACTUALIZADO con nuevo token (ID: ${tokenRecord.id})`);
-        } else {
-            // ✅ Crear nuevo registro
-            tokenRecord = await TokenFCM.create({
-                token: token,
-                usuario_id: req.usuario.id,
-                dispositivo: userAgent,
-                plataforma: plataforma || 'web',
-                ultimo_uso: new Date(),
-                activo: true,
-                creado_en: new Date(),
-                actualizado_en: new Date()
-            });
-            console.log(`✅ Nuevo registro CREADO (ID: ${tokenRecord.id})`);
+        if (tokenAntiguo) {
+            // Eliminar el token antiguo
+            await tokenAntiguo.destroy();
+            console.log(`🗑️ Token antiguo ELIMINADO (ID: ${tokenAntiguo.id})`);
         }
         
-        console.log(`📊 Token activo: SÍ ✅`);
+        // ✅ 3. Crear NUEVO registro con el token nuevo
+        const nuevoToken = await TokenFCM.create({
+            token: token,
+            usuario_id: req.usuario.id,
+            dispositivo: userAgent,
+            plataforma: plataforma || 'web',
+            ultimo_uso: new Date(),
+            activo: true,
+            creado_en: new Date(),
+            actualizado_en: new Date()
+        });
+        console.log(`✅ Nuevo token CREADO (ID: ${nuevoToken.id})`);
         
         res.json({ 
             success: true, 
