@@ -4,16 +4,11 @@ const logger = require('../utils/logger');
 
 class PushNotificationService {
     
-    /**
-     * Registrar token FCM de un usuario
-     */
     async registrarToken(usuarioId, token, dispositivo, plataforma) {
         try {
-            // Buscar si el token ya existe
             let tokenExistente = await TokenFCM.findOne({ where: { token } });
             
             if (tokenExistente) {
-                // Actualizar último uso
                 await tokenExistente.update({
                     ultimo_uso: new Date(),
                     dispositivo,
@@ -21,7 +16,6 @@ class PushNotificationService {
                     activo: true
                 });
             } else {
-                // Crear nuevo token
                 await TokenFCM.create({
                     token,
                     usuario_id: usuarioId,
@@ -38,9 +32,6 @@ class PushNotificationService {
         }
     }
     
-    /**
-     * Eliminar token FCM (logout o token inválido)
-     */
     async eliminarToken(token) {
         try {
             await TokenFCM.destroy({ where: { token } });
@@ -52,9 +43,6 @@ class PushNotificationService {
         }
     }
     
-    /**
-     * Enviar notificación push a un usuario específico
-     */
     async enviarNotificacionAUsuario(usuarioId, titulo, cuerpo, datos = {}) {
         try {
             const tokens = await TokenFCM.findAll({
@@ -116,11 +104,14 @@ class PushNotificationService {
                     resultados.push({ token: tokenRecord.token, success: true, response });
                     logger.info(`📨 Notificación enviada a token: ${tokenRecord.token.substring(0, 20)}...`);
                 } catch (error) {
-                    // Si el token es inválido, desactivarlo
-                    if (error.code === 'messaging/registration-token-not-registered') {
-                        await tokenRecord.update({ activo: false });
-                        logger.warn(`⚠️ Token inválido desactivado: ${tokenRecord.token.substring(0, 20)}...`);
-                    }
+                    // ✅ COMENTADO - NO desactivar el token
+                    // if (error.code === 'messaging/registration-token-not-registered') {
+                    //     await tokenRecord.update({ activo: false });
+                    //     logger.warn(`⚠️ Token inválido desactivado: ${tokenRecord.token.substring(0, 20)}...`);
+                    // }
+                    
+                    // ✅ Solo registrar el error
+                    logger.warn(`⚠️ Error enviando notificación a ${tokenRecord.token.substring(0, 20)}...: ${error.message}`);
                     resultados.push({ token: tokenRecord.token, success: false, error: error.message });
                 }
             }
@@ -132,9 +123,6 @@ class PushNotificationService {
         }
     }
     
-    /**
-     * Enviar notificación de orden por vencer
-     */
     async notificarOrdenPorVencer(ordenId, minutosAntes = 0) {
         try {
             const orden = await Orden.findByPk(ordenId, {
@@ -168,9 +156,6 @@ class PushNotificationService {
         }
     }
     
-    /**
-     * Programar notificaciones push para una orden (usando setTimeout en backend)
-     */
     async programarNotificacionPush(orden, minutosAntes) {
         const fechaHora = new Date(`${orden.fecha_limite}T${orden.hora_limite || '08:00'}`);
         const fechaDisparo = new Date(fechaHora.getTime() - minutosAntes * 60000);

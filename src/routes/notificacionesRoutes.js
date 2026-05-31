@@ -124,6 +124,7 @@ router.post('/test', autenticar, async (req, res) => {
 });
 
 // Programar notificación push para una orden
+// Programar notificación push para una orden
 router.post('/programar', autenticar, async (req, res) => {
     try {
         const { ordenId, minutosAntes } = req.body;
@@ -173,10 +174,10 @@ router.post('/programar', autenticar, async (req, res) => {
                         let tituloDetallado, cuerpoDetallado;
                         if (minutosAntes === 0) {
                             tituloDetallado = `📋 ORDEN VENCE AHORA`;
-                            cuerpoDetallado = `${orden.id_externo}\n👨‍⚕️ ${doctorNombre}\n🦷 ${servicioNombre}\n👤 ${clienteNombre}`;
+                            cuerpoDetallado = `${orden.id_externo}\n${doctorNombre}\n${servicioNombre}\n${clienteNombre}`;
                         } else {
                             tituloDetallado = `⚠️ ORDEN POR VENCER`;
-                            cuerpoDetallado = `${orden.id_externo}\n⏰ ${minutosAntes} min\n👨‍⚕️ ${doctorNombre}\n🦷 ${servicioNombre}\n👤 ${clienteNombre}`;
+                            cuerpoDetallado = `${orden.id_externo}\n⏰ ${minutosAntes} min\n${doctorNombre}\n${servicioNombre}\n${clienteNombre}`;
                         }
                         
                         const message = {
@@ -190,8 +191,6 @@ router.post('/programar', autenticar, async (req, res) => {
                                 notification: {
                                     title: tituloDetallado,
                                     body: cuerpoDetallado,
-                                    icon: 'ic_notification',
-                                    color: '#6366f1',
                                     sound: 'default',
                                     channelId: 'ordenes_channel'
                                 }
@@ -207,10 +206,13 @@ router.post('/programar', autenticar, async (req, res) => {
                             console.log(`✅ Notificación push enviada: ${response.messageId || 'OK'}`);
                         } catch (sendError) {
                             console.error(`❌ Error enviando push:`, sendError.message);
-                            if (sendError.code === 'messaging/registration-token-not-registered') {
-                                await tokenRecord.update({ activo: false });
-                                console.log(`⚠️ Token inválido desactivado`);
-                            }
+                            // ✅ COMENTA ESTA LÍNEA - NO desactivar el token
+                            // if (sendError.code === 'messaging/registration-token-not-registered') {
+                            //     await tokenRecord.update({ activo: false });
+                            //     console.log(`⚠️ Token inválido desactivado`);
+                            // }
+                            // ✅ En su lugar, solo registra el error
+                            console.log(`⚠️ Error temporal, el token sigue activo`);
                         }
                     }
                 } catch (error) {
