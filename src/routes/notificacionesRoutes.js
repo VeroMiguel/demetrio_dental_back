@@ -5,7 +5,7 @@ const { Orden, Doctor, Servicio, TokenFCM } = require('../models');
 const admin = require('../config/firebase-admin');
 const { Op } = require('sequelize');
 
-// Registrar token FCM - VERSIÓN DEFINITIVA
+// Registrar token FCM - VERSIÓN CORREGIDA (sin violación de UNIQUE)
 router.post('/registrar-token', autenticar, async (req, res) => {
     try {
         const { token, dispositivo, plataforma } = req.body;
@@ -17,9 +17,34 @@ router.post('/registrar-token', autenticar, async (req, res) => {
         const userAgent = dispositivo || req.headers['user-agent'] || '';
         
         console.log(`📝 [DEBUG] Registrando token para usuario ${req.usuario.id}`);
+        console.log(`📝 [DEBUG] Token: ${token.substring(0, 40)}...`);
         
-        // ✅ BUSCAR por usuario Y plataforma (no solo por token)
-        // Esto evita crear múltiples registros para el mismo usuario/dispositivo
+        // ✅ PRIMERO: Buscar si el token YA EXISTE (por su valor único)
+        let tokenExistente = await TokenFCM.findOne({ 
+            where: { token: token }
+        });
+        
+        if (tokenExistente) {
+            // ✅ El token ya existe en la BD - solo actualizar sus datos
+            await tokenExistente.update({
+                usuario_id: req.usuario.id,
+                dispositivo: userAgent,
+                plataforma: plataforma || 'web',
+                ultimo_uso: new Date(),
+                activo: true,
+                actualizado_en: new Date()
+            });
+            console.log(`✅ Token existente ACTUALIZADO (ID: ${tokenExistente.id})`);
+            
+            res.json({ 
+                success: true, 
+                message: 'Token actualizado correctamente',
+                activo: true
+            });
+            return;
+        }
+        
+        // ✅ El token NO existe - buscar si hay un registro para este usuario/plataforma
         let tokenRecord = await TokenFCM.findOne({ 
             where: { 
                 usuario_id: req.usuario.id,
@@ -28,17 +53,17 @@ router.post('/registrar-token', autenticar, async (req, res) => {
         });
         
         if (tokenRecord) {
-            // ✅ Actualizar token existente
+            // ✅ Actualizar el registro existente con el NUEVO token
             await tokenRecord.update({
-                token: token,
+                token: token,  // ← Cambiar el token
                 dispositivo: userAgent,
                 ultimo_uso: new Date(),
                 activo: true,
                 actualizado_en: new Date()
             });
-            console.log(`✅ Token ACTUALIZADO para usuario ${req.usuario.id} (${plataforma})`);
+            console.log(`✅ Registro ACTUALIZADO con nuevo token (ID: ${tokenRecord.id})`);
         } else {
-            // ✅ Crear nuevo token (solo si no existe para esta plataforma)
+            // ✅ Crear nuevo registro
             tokenRecord = await TokenFCM.create({
                 token: token,
                 usuario_id: req.usuario.id,
@@ -49,16 +74,15 @@ router.post('/registrar-token', autenticar, async (req, res) => {
                 creado_en: new Date(),
                 actualizado_en: new Date()
             });
-            console.log(`✅ Nuevo token CREADO para usuario ${req.usuario.id} (${plataforma})`);
+            console.log(`✅ Nuevo registro CREADO (ID: ${tokenRecord.id})`);
         }
         
-        // ✅ Verificar resultado
-        console.log(`📊 Token activo: ${tokenRecord.activo === 1 ? 'SÍ ✅' : 'NO ❌'}`);
+        console.log(`📊 Token activo: SÍ ✅`);
         
         res.json({ 
             success: true, 
             message: 'Token registrado correctamente',
-            activo: tokenRecord.activo === 1
+            activo: true
         });
         
     } catch (error) {
@@ -195,7 +219,6 @@ router.post('/programar', autenticar, async (req, res) => {
                             console.log(`✅ Notificación push enviada: ${response.messageId || 'OK'}`);
                         } catch (sendError) {
                             console.error(`❌ Error enviando push:`, sendError.message);
-                            // ✅ SOLO desactivar si el token ya no existe en FCM
                             if (sendError.code === 'messaging/registration-token-not-registered') {
                                 await tokenRecord.update({ activo: false });
                                 console.log(`⚠️ Token inválido desactivado`);
