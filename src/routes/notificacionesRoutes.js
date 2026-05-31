@@ -3,10 +3,9 @@ const router = express.Router();
 const { autenticar } = require('../middleware/auth');
 const { Orden, Doctor, Servicio, TokenFCM } = require('../models');
 const admin = require('../config/firebase-admin');
-const { Op } = require('sequelize'); // ✅ AGREGAR ESTA LÍNEA
+const { Op } = require('sequelize');
 
-// notificacionesRoutes.js - Versión CORREGIDA
-
+// Registrar token FCM - VERSIÓN DEFINITIVA
 router.post('/registrar-token', autenticar, async (req, res) => {
     try {
         const { token, dispositivo, plataforma } = req.body;
@@ -18,25 +17,28 @@ router.post('/registrar-token', autenticar, async (req, res) => {
         const userAgent = dispositivo || req.headers['user-agent'] || '';
         
         console.log(`📝 [DEBUG] Registrando token para usuario ${req.usuario.id}`);
-        console.log(`📝 [DEBUG] Plataforma: ${plataforma || 'web'}`);
-        console.log(`📝 [DEBUG] Token: ${token.substring(0, 30)}...`);
         
-        // ✅ BUSCAR si el token ya existe (por su valor único)
-        let tokenRecord = await TokenFCM.findOne({ where: { token: token } });
+        // ✅ BUSCAR por usuario Y plataforma (no solo por token)
+        // Esto evita crear múltiples registros para el mismo usuario/dispositivo
+        let tokenRecord = await TokenFCM.findOne({ 
+            where: { 
+                usuario_id: req.usuario.id,
+                plataforma: plataforma || 'web'
+            } 
+        });
         
         if (tokenRecord) {
-            // ✅ Ya existe - ACTUALIZAR
+            // ✅ Actualizar token existente
             await tokenRecord.update({
-                usuario_id: req.usuario.id,
+                token: token,
                 dispositivo: userAgent,
-                plataforma: plataforma || 'web',
                 ultimo_uso: new Date(),
                 activo: true,
                 actualizado_en: new Date()
             });
-            console.log(`✅ Token existente ACTUALIZADO para usuario ${req.usuario.id}`);
+            console.log(`✅ Token ACTUALIZADO para usuario ${req.usuario.id} (${plataforma})`);
         } else {
-            // ✅ Nuevo token - CREAR
+            // ✅ Crear nuevo token (solo si no existe para esta plataforma)
             tokenRecord = await TokenFCM.create({
                 token: token,
                 usuario_id: req.usuario.id,
@@ -47,34 +49,16 @@ router.post('/registrar-token', autenticar, async (req, res) => {
                 creado_en: new Date(),
                 actualizado_en: new Date()
             });
-            console.log(`✅ Nuevo token CREADO para usuario ${req.usuario.id}`);
+            console.log(`✅ Nuevo token CREADO para usuario ${req.usuario.id} (${plataforma})`);
         }
         
-        // ✅ AHORA desactivar tokens ANTIGUOS del mismo usuario (NO el actual)
-        // Usar el token que acabamos de registrar/actualizar
-        const tokenActual = token;  // Guardar el token actual
-        
-        await TokenFCM.update(
-            { activo: false },
-            { 
-                where: { 
-                    usuario_id: req.usuario.id,
-                    token: { [Op.ne]: tokenActual },  // Diferente al actual
-                    activo: true,
-                    id: { [Op.ne]: tokenRecord.id }   // También diferente por ID
-                } 
-            }
-        );
-        
-        // ✅ Verificar que el token quedó activo
-        const verificar = await TokenFCM.findOne({ where: { token: token } });
-        console.log(`📊 Token registrado - Activo: ${verificar?.activo === 1 ? 'SÍ ✅' : 'NO ❌'}`);
-        console.log(`📊 ID del token activo: ${verificar?.id}`);
+        // ✅ Verificar resultado
+        console.log(`📊 Token activo: ${tokenRecord.activo === 1 ? 'SÍ ✅' : 'NO ❌'}`);
         
         res.json({ 
             success: true, 
-            message: tokenRecord.wasCreated ? 'Token registrado correctamente' : 'Token actualizado correctamente',
-            activo: verificar?.activo === 1
+            message: 'Token registrado correctamente',
+            activo: tokenRecord.activo === 1
         });
         
     } catch (error) {
@@ -134,7 +118,6 @@ router.post('/programar', autenticar, async (req, res) => {
         
         console.log(`📨 [DEBUG] Solicitud programar push: ordenId=${ordenId}, minutosAntes=${minutosAntes}`);
         
-        // Buscar la orden con sus relaciones
         const orden = await Orden.findByPk(ordenId, {
             include: [
                 { model: Doctor, as: 'doctor', attributes: ['nombre'] },
@@ -149,21 +132,18 @@ router.post('/programar', autenticar, async (req, res) => {
         
         console.log(`📦 Orden encontrada: ${orden.id_externo}, fecha_limite: ${orden.fecha_limite}, hora_limite: ${orden.hora_limite}`);
         
-        // Calcular la fecha de disparo
         const fechaHora = new Date(`${orden.fecha_limite}T${orden.hora_limite || '08:00'}`);
         const fechaDisparo = new Date(fechaHora.getTime() - minutosAntes * 60000);
         const ahora = new Date();
         const delay = fechaDisparo.getTime() - ahora.getTime();
         
-        console.log(`⏰ Calculando delay: ahora=${ahora.toISOString()}, fechaDisparo=${fechaDisparo.toISOString()}, delay=${delay}ms (${Math.round(delay / 60000)} min)`);
+        console.log(`⏰ Calculando delay: ${Math.round(delay / 60000)} min`);
         
         if (delay > 0) {
-            // Programar el envío
             setTimeout(async () => {
                 console.log(`🔔 [TIMER] Enviando notificación push para orden ${orden.id_externo} (${minutosAntes} min antes)`);
                 
                 try {
-                    // Obtener tokens del usuario que creó la orden
                     const tokens = await TokenFCM.findAll({
                         where: { usuario_id: orden.usuario_creo_id, activo: true }
                     });
@@ -173,24 +153,26 @@ router.post('/programar', autenticar, async (req, res) => {
                         return;
                     }
                     
-                    // Enviar notificación a cada token
                     for (const tokenRecord of tokens) {
-                        let tituloDetallado, cuerpoDetallado;
-                        
                         const doctorNombre = orden.doctor?.nombre || 'Doctor';
                         const servicioNombre = orden.servicio?.nombre || 'Servicio';
                         const clienteNombre = orden.cliente_nombre || 'Sin cliente';
                         
+                        let tituloDetallado, cuerpoDetallado;
                         if (minutosAntes === 0) {
                             tituloDetallado = `📋 ORDEN VENCE AHORA`;
                             cuerpoDetallado = `${orden.id_externo}\n👨‍⚕️ ${doctorNombre}\n🦷 ${servicioNombre}\n👤 ${clienteNombre}`;
                         } else {
                             tituloDetallado = `⚠️ ORDEN POR VENCER`;
-                            cuerpoDetallado = `${orden.id_externo}\n⏰ ${minutosAntes} minutos\n👨‍⚕️ ${doctorNombre}\n🦷 ${servicioNombre}\n👤 ${clienteNombre}`;
+                            cuerpoDetallado = `${orden.id_externo}\n⏰ ${minutosAntes} min\n👨‍⚕️ ${doctorNombre}\n🦷 ${servicioNombre}\n👤 ${clienteNombre}`;
                         }
                         
                         const message = {
                             token: tokenRecord.token,
+                            notification: {
+                                title: tituloDetallado,
+                                body: cuerpoDetallado,
+                            },
                             android: {
                                 priority: 'high',
                                 notification: {
@@ -199,26 +181,21 @@ router.post('/programar', autenticar, async (req, res) => {
                                     icon: 'ic_notification',
                                     color: '#6366f1',
                                     sound: 'default',
-                                    channelId: 'ordenes_channel',
-                                    clickAction: 'OPEN_ACTIVITY'
+                                    channelId: 'ordenes_channel'
                                 }
                             },
                             data: {
                                 ordenId: orden.id.toString(),
-                                url: `/ordenes/${orden.id}`,
-                                click_action: `/ordenes/${orden.id}`,
-                                titulo_detallado: tituloDetallado,
-                                cuerpo_detallado: cuerpoDetallado
+                                url: `/ordenes/${orden.id}`
                             }
                         };
-                        
-                        console.log(`📨 Enviando push Android a token: ${tokenRecord.token.substring(0, 20)}...`);
                         
                         try {
                             const response = await admin.messaging().send(message);
                             console.log(`✅ Notificación push enviada: ${response.messageId || 'OK'}`);
                         } catch (sendError) {
                             console.error(`❌ Error enviando push:`, sendError.message);
+                            // ✅ SOLO desactivar si el token ya no existe en FCM
                             if (sendError.code === 'messaging/registration-token-not-registered') {
                                 await tokenRecord.update({ activo: false });
                                 console.log(`⚠️ Token inválido desactivado`);
@@ -226,20 +203,17 @@ router.post('/programar', autenticar, async (req, res) => {
                         }
                     }
                 } catch (error) {
-                    console.error(`❌ Error enviando notificación push:`, error);
+                    console.error(`❌ Error en envío:`, error);
                 }
             }, delay);
             
-            console.log(`⏰ Notificación push PROGRAMADA para orden ${orden.id_externo} en ${Math.round(delay / 60000)} min`);
-            
-            res.json({ success: true, message: `Notificación programada para ${minutosAntes} min antes`, delay: Math.round(delay / 60000) });
+            res.json({ success: true, message: `Notificación programada para ${minutosAntes} min antes` });
         } else {
-            console.log(`⚠️ No se programó notificación: delay no positivo (${delay}ms)`);
-            res.json({ success: false, message: 'Fecha ya pasada, no se programó notificación' });
+            res.json({ success: false, message: 'Fecha ya pasada' });
         }
     } catch (error) {
-        console.error('❌ Error programando notificación:', error);
-        res.status(500).json({ error: 'Error programando notificación', details: error.message });
+        console.error('❌ Error:', error);
+        res.status(500).json({ error: 'Error programando notificación' });
     }
 });
 
